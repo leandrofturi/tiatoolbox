@@ -76,6 +76,12 @@ def is_dicom(path: Path) -> bool:
     return is_dcm or is_dcm_dir
 
 
+def is_zeiss(path: Path) -> bool:
+    path = Path(path)
+    is_czi = path.suffix.lower() == ".czi"
+    return is_czi
+
+
 def is_tiled_tiff(path: Path) -> bool:
     """Check if the input is a tiled TIFF file.
 
@@ -380,6 +386,9 @@ class WSIReader:
         if is_dicom(input_path):
             return DICOMWSIReader(input_path, mpp=mpp, power=power)
 
+        if is_zeiss(input_path):
+            return ZEISSWSIReader(input_path, mpp=mpp, power=power)
+
         _, _, suffixes = utils.misc.split_path_name_ext(input_path)
         last_suffix = suffixes[-1]
 
@@ -449,6 +458,7 @@ class WSIReader:
             ".zarr",
             ".db",
             ".json",
+            ".czi",
         ]:
             msg = f"File {input_path} is not a supported file format."
             raise FileNotSupportedError(
@@ -5062,6 +5072,114 @@ class DICOMWSIReader(WSIReader):
             )
 
         return utils.transforms.background_composite(image=im_region, alpha=False)
+
+
+class ZEISSWSIReader(WSIReader):
+    wsizeiss = None
+
+    def __init__(
+        self: ZEISSWSIReader,
+        input_img: str | Path | np.ndarray,
+        mpp: tuple[Number, Number] | None = None,
+        power: Number | None = None,
+    ) -> None:
+        from aicspylibczi import CziFile  # noqa: PLC0415
+
+        super().__init__(input_img, mpp, power)
+        self.czi = CziFile(input_img)
+        dims = self.czi.get_dims_shape()
+        C = [dim['C'][0] for dim in dims]
+        if len(set(C)) > 1:
+            logger.warning(
+                "Multiplas dimensões de C, necessário especificar na leitura",
+                C
+            )
+        self._czi_C = max(C)
+
+        ti = self.czi.get_mosaic_bounding_box()
+        self._czi_offset_X = ti.x
+        self._czi_offset_Y = ti.y
+
+    def _info(self: ZEISSWSIReader) -> WSIMeta:
+        ti = self.czi.get_mosaic_bounding_box()
+        level_dimensions = [(ti.w, ti.h)]
+        level_downsamples = [1.0]
+
+        root = self.czi.meta
+        mpp_x_m = None
+        mpp_y_m = None
+        for dist in root.findall(".//Scaling//Items//Distance"):
+            axis = dist.get("Id") or dist.get("id")
+            val_node = dist.find(".//Value")
+            if axis and val_node is not None and val_node.text:
+                try:
+                    v = float(val_node.text)
+                except ValueError:
+                    continue
+                if axis.upper() == "X":
+                    mpp_x_m = v
+                elif axis.upper() == "Y":
+                    mpp_y_m = v
+
+        return WSIMeta(
+            slide_dimensions=level_dimensions[0],
+            level_dimensions=level_dimensions,
+            level_downsamples=level_downsamples,
+            axes="YXS",
+            mpp=(mpp_x_m, mpp_y_m),
+            level_count=len(level_dimensions),
+            vendor="Zeiss",
+            file_path=self.input_path,
+        )
+
+    def read_rect(
+        self: ZEISSWSIReader,
+        location: IntPair,
+        size: IntPair,
+        resolution: Resolution = 0,
+        units: Units = "level",
+        interpolation: str = "optimise",
+        pad_mode: str = "constant",
+        pad_constant_values: int | IntPair = 0,
+        coord_space: str = "baseline",
+        **kwargs: dict,  # noqa: ARG002
+    ) -> np.ndarray:
+        c = kwargs.pop("C", self._czi_C)
+        region = (
+            self._czi_offset_X + location[0],
+            self._czi_offset_Y + location[1],
+            size[0],
+            size[1]
+        )
+        if units == "level":
+            tile = self.czi.read_mosaic(region, scale_factor=1.0, C=c)
+        elif units == "power":
+            scale_factor = 1.0 / 2 ** resolution
+            tile = self.czi.read_mosaic(region, scale_factor=scale_factor, C=c)
+        else:
+            raise FileNotSupportedError(
+                f"units={units} not supported!"
+            )
+        tile = np.squeeze(tile)
+        return utils.transforms.background_composite(image=tile, alpha=False)
+
+    def read_bounds(
+        self: ZEISSWSIReader,
+        bounds: IntBounds,
+        resolution: Resolution = 0,
+        units: Units = "level",
+        interpolation: str = "optimise",
+        pad_mode: str = "constant",
+        pad_constant_values: int | IntPair = 0,
+        coord_space: str = "baseline",
+        **kwargs: dict,  # noqa: ARG002
+    ) -> np.ndarray:
+        return self.read_rect(
+            (bounds[0], bounds[1]),
+            (bounds[2], bounds[3]),
+            resolution=resolution,
+            units=units
+        )
 
 
 class NGFFWSIReader(WSIReader):
