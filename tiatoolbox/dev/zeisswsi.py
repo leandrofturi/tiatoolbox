@@ -39,6 +39,3 @@ plt.show()
 
 mask = slide.tissue_mask(resolution=8.0, units="power")
 thumb_np = mask.slide_thumbnail(resolution=8.0, units="power").astype(np.uint8)
-coords = np.argwhere(thumb_np > 0)
-first_y, first_x = coords[0]   # (linha, coluna)
-print(first_x, first_y)

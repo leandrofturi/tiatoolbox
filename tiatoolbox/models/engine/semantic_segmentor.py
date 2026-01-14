@@ -1239,6 +1239,9 @@ class SemanticSegmentor:
             # same name multiple times (maybe they have different root path)
             self._outputs.append([str(img_path), str(wsi_save_path)])
 
+            with open(save_dir / "img_map.txt", 'a') as f:
+                f.write(f"{str(img_path)};{str(wsi_save_path)}")
+
             # ? will this corrupt old version if control + c midway?
             map_file_path = save_dir / "file_map.dat"
             # backup old version first
