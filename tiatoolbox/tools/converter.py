@@ -215,13 +215,15 @@ def stitch_from_tiles(
         )
 
 
-convert_tiles("/home/lfurlam/Documentos/PAD/E264810.czi", S=0)
+"""
+convert_tiles("PAD/E264810.czi", S=0)
 
 stitch_from_tiles(
-    czi_path="/home/lfurlam/Documentos/PAD/E264810.czi",
-    tiles_dir="/home/lfurlam/Documentos/PAD/E264810_tiles",
-    output_class_path="/home/lfurlam/Documentos/PAD/E264810_tiles_results",
+    czi_path="PAD/E264810.czi",
+    tiles_dir="PAD/E264810_tiles",
+    output_class_path="PAD/E264810_tiles_results",
     scale_factor=0.05,
     compression="lzma",
     use_tqdm=True
 )
+"""

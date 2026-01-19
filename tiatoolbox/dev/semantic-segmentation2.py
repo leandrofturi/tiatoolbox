@@ -1,12 +1,13 @@
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-from pathlib import Path
+from matplotlib.colors import ListedColormap, BoundaryNorm
 
 from tiatoolbox.utils.misc import imread
 
-mpl.rcParams["figure.dpi"] = 300  # for high resolution figure in notebook
-mpl.rcParams["figure.facecolor"] = "white"  # To make sure text is visible in dark mode
+mpl.rcParams["figure.dpi"] = 300
+mpl.rcParams["figure.facecolor"] = "white"
+
 
 tile_prediction_raw = np.load(
     "/home/lfurlam/Documentos/PAD/E264810_tiles_results/0.raw.0.npy"
@@ -37,10 +38,6 @@ print(
     tile.shape[2],
 )
 
-
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap, BoundaryNorm
 
 label_names_dict = {0:"Tumour", 1:"Stroma", 2:"Inflamatory", 3:"Necrosis", 4:"Others"}
 

@@ -337,7 +337,7 @@ class WSIStreamDataset(torch_data.Dataset):
     def __init__(
         self: WSIStreamDataset,
         ioconfig: IOSegmentorConfig,
-        wsi_paths: list[str | Path],
+        wsi_paths: list[str | Path | np.ndarray],
         mp_shared_space: Namespace,
         preproc: Callable[[np.ndarray], np.ndarray] | None = None,
         mode: str = "wsi",
@@ -362,12 +362,16 @@ class WSIStreamDataset(torch_data.Dataset):
         self.wsi_idx = None  # to be received externally via thread communication
         self.reader = None
 
-    def _get_reader(self: WSIStreamDataset, img_path: str | Path) -> WSIReader:
+    def _get_reader(self: WSIStreamDataset, img_path: str | Path | np.ndarray) -> WSIReader:
         """Get appropriate reader for input path."""
-        img_path = Path(img_path)
-        if self.mode == "wsi":
-            return WSIReader.open(img_path)
-        img = imread(img_path)
+        if isinstance(img_path, np.ndarray):
+            img = img_path.copy()
+        else:
+            img_path = Path(img_path)
+            if self.mode == "wsi":
+                return WSIReader.open(img_path)
+            img = imread(img_path)
+        
         # initialise metadata for VirtualWSIReader.
         # here, we simulate a whole-slide image, but with a single level.
         metadata = WSIMeta(
@@ -714,15 +718,18 @@ class SemanticSegmentor:
 
     @staticmethod
     def get_reader(
-        img_path: str | Path,
+        img_path: str | Path | np.ndarray,
         mask_path: str | Path,
         mode: str,
         *,
         auto_get_mask: bool,
     ) -> tuple[WSIReader, WSIReader]:
         """Define how to get reader for mask and source image."""
-        img_path = Path(img_path)
-        reader = WSIReader.open(img_path)
+        if isinstance(img_path, np.ndarray):
+            reader = VirtualWSIReader(img_path)
+        else:
+            img_path = Path(img_path)
+            reader = WSIReader.open(img_path)
 
         mask_reader = None
         if mask_path is not None:
@@ -749,7 +756,7 @@ class SemanticSegmentor:
         ioconfig: IOSegmentorConfig,
         save_path: str,
         mode: str,
-    ) -> None:
+    ) -> list[np.ndarray]:
         """Make a prediction on tile/wsi.
 
         Args:
@@ -848,7 +855,7 @@ class SemanticSegmentor:
             pbar.update()
         pbar.close()
 
-        self._process_predictions(
+        output = self._process_predictions(
             cum_output,
             wsi_reader,
             ioconfig,
@@ -859,6 +866,8 @@ class SemanticSegmentor:
         # clean up the cache directories
         shutil.rmtree(cache_dir)
 
+        return output
+
     def _process_predictions(
         self: SemanticSegmentor,
         cum_batch_predictions: list,
@@ -866,7 +875,7 @@ class SemanticSegmentor:
         ioconfig: IOSegmentorConfig,
         save_path: str,
         cache_dir: str,
-    ) -> None:
+    ) -> list[np.ndarray]:
         """Define how the aggregated predictions are processed.
 
         This includes merging the prediction if necessary and also saving afterwards.
@@ -897,6 +906,7 @@ class SemanticSegmentor:
         # output patch this can exceed the image bound at the requested
         # resolution remove singleton due to split.
         locations = np.array([v[0] for v in locations])
+        output = []
         for index, output_resolution in enumerate(ioconfig.output_resolutions):
             # assume resolution index to be in the same order as L
             merged_resolution = ioconfig.highest_input_resolution
@@ -913,13 +923,15 @@ class SemanticSegmentor:
             to_merge_predictions = [v[index][0] for v in predictions]
             sub_save_path = f"{save_path}.raw.{index}.npy"
             sub_count_path = f"{cache_dir}/count.{index}.npy"
-            self.merge_prediction(
+            cum_canvas = self.merge_prediction(
                 merged_shape[::-1],  # XY to YX
                 to_merge_predictions,
                 merged_locations,
                 save_path=sub_save_path,
                 cache_count_path=sub_count_path,
             )
+            output.append(cum_canvas)
+        return output
 
     @staticmethod
     def merge_prediction(
@@ -1184,13 +1196,13 @@ class SemanticSegmentor:
         self: SemanticSegmentor,
         imgs: list,
         wsi_idx: int,
-        img_path: str | Path,
+        img_path: str | Path | np.ndarray,
         mode: str,
         ioconfig: IOSegmentorConfig,
         save_dir: str | Path,
         *,
         crash_on_exception: bool,
-    ) -> None:
+    ) -> list[np.ndarray]:
         """Predict on multiple WSIs.
 
         Args:
@@ -1230,10 +1242,12 @@ class SemanticSegmentor:
                 `save_path` corresponds to the output predictions.
 
         """
+        arr = None
         try:
             wsi_save_path = save_dir / f"{wsi_idx}"
-            self._predict_one_wsi(wsi_idx, ioconfig, str(wsi_save_path), mode)
+            arr = self._predict_one_wsi(wsi_idx, ioconfig, str(wsi_save_path), mode)
 
+            self._outputs
             # Do not use dict with file name as key, because it can be
             # overwritten. It may be user intention to provide files with a
             # same name multiple times (maybe they have different root path)
@@ -1261,6 +1275,8 @@ class SemanticSegmentor:
             if crash_on_exception:
                 raise err  # noqa: TRY201
             logging.exception("Crashed on %s", wsi_save_path)
+
+        return arr
 
     def predict(  # noqa: PLR0913
         self: SemanticSegmentor,
@@ -1290,12 +1306,12 @@ class SemanticSegmentor:
         else a `Value Error` will be raised.
 
         Args:
-            imgs (list, ndarray):
+            imgs (list, ndarray, np.ndarray):
                 List of inputs to process. When using `"patch"` mode,
                 the input must be either a list of images, a list of
                 image file paths or a numpy array of an image list. When
                 using `"tile"` or `"wsi"` mode, the input must be a list
-                of file paths.
+                of file paths. The img can be a np.ndarray.
             masks (list):
                 List of masks. Only utilised when processing image tiles
                 and whole-slide images. Patches are only processed if
