@@ -756,6 +756,7 @@ class SemanticSegmentor:
         ioconfig: IOSegmentorConfig,
         save_path: str,
         mode: str,
+        show_progress: bool = False
     ) -> list[np.ndarray]:
         """Make a prediction on tile/wsi.
 
@@ -807,15 +808,16 @@ class SemanticSegmentor:
         self._mp_shared_space.patch_outputs = patch_outputs
         self._mp_shared_space.wsi_idx = torch.Tensor([wsi_idx]).share_memory_()
 
-        pbar_desc = "Process Batch: "
-        pbar = tqdm.tqdm(
-            desc=pbar_desc,
-            leave=True,
-            total=len(self._loader),
-            ncols=80,
-            ascii=True,
-            position=0,
-        )
+        if show_progress:
+            pbar_desc = "Process Batch: "
+            pbar = tqdm.tqdm(
+                desc=pbar_desc,
+                leave=True,
+                total=len(self._loader),
+                ncols=80,
+                ascii=True,
+                position=0,
+            )
 
         cum_output = []
         for _, batch_data in enumerate(self._loader):
@@ -852,8 +854,11 @@ class SemanticSegmentor:
                 )
             else:
                 cum_output.extend(sample_outputs)
-            pbar.update()
-        pbar.close()
+
+            if show_progress:
+                pbar.update()
+        if show_progress:
+            pbar.close()
 
         output = self._process_predictions(
             cum_output,
@@ -1265,9 +1270,9 @@ class SemanticSegmentor:
             joblib.dump(self._outputs, map_file_path)
 
             # verbose mode, error by passing ?
-            logging.info("Finish: %d", wsi_idx / len(imgs))
-            logging.info("--Input: %s", str(img_path))
-            logging.info("--Output: %s", str(wsi_save_path))
+            # logging.info("Finish: %d", wsi_idx / len(imgs))
+            # logging.info("--Input: %s", str(img_path))
+            # logging.info("--Output: %s", str(wsi_save_path))
         # prevent deep source check because this is bypass and
         # delegating error message
         except Exception as err:  # skipcq: PYL-W0703

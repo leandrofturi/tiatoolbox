@@ -88,8 +88,7 @@ output = bcc_segmentor.predict(
     stride_shape=[512, 512],
     device=device,
     crash_on_exception=True,
-    return_np=True
 )
-up3 = np.load("{output}.raw.0.npy")
+up3 = np.load(f"{output[0][1]}.raw.0.npy")
 up3 = cv2.resize(up3, (2048,  2048), interpolation=cv2.INTER_LINEAR)
 plot_overlay(up3, tile, alpha=0.5)
